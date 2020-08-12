@@ -1,2 +1,2 @@
-# xv6
-Chnages made while tinkering with xv6 OS
+# MIT JOS
+Chnages made while tinkering with JOS
