@@ -1,2 +1,2 @@
 # MIT JOS
-Chnages made while tinkering with JOS
+Changes made while tinkering with JOS
