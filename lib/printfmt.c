@@ -28,6 +28,23 @@ static const char * const error_string[MAXERROR] =
 	[E_FAULT]	= "segmentation fault",
 };
 
+/* 
+ * ansi to CGA_format
+ */
+#define ANSI_TO_CGA_FG_OFFST 30
+#define ANSI_TO_CGA_BG_OFFST 40
+static uint8_t color_code = 7;
+static int ansi_to_cga[] = {
+	0, /* black */
+    4, /* red */
+    2, /* green */
+    7, /* yellow */
+    1, /* blue */
+    5, /* magenta */
+    3, /* cyan */
+    7, /* white */
+};
+
 /*
  * Print a number (base <= 16) in reverse order,
  * using specified putch function and associated pointer putdat.
@@ -42,11 +59,11 @@ printnum(void (*putch)(int, void*), void *putdat,
 	} else {
 		// print any needed pad characters before first digit
 		while (--width > 0)
-			putch(padc, putdat);
+			putch(padc + (color_code << 8), putdat);
 	}
 
 	// then print this (the least significant) digit
-	putch("0123456789abcdef"[num % base], putdat);
+	putch("0123456789abcdef"[num % base] + (color_code << 8), putdat);
 }
 
 // Get an unsigned int of various possible sizes from a varargs list,
@@ -75,6 +92,34 @@ getint(va_list *ap, int lflag)
 		return va_arg(*ap, int);
 }
 
+const char* parsecolor(const char* fmt, uint8_t* color, uint8_t is_fg_code){
+	char ch = *fmt++;
+	if(ch < '0' || ch > '9'){
+		return NULL;
+	}
+	for(int tmp_color=0;;fmt++){
+		tmp_color = tmp_color*10 + ch - '0';
+		ch = *fmt;
+		if(is_fg_code && ch == ';'){
+			if((tmp_color - ANSI_TO_CGA_FG_OFFST > 7) || (tmp_color - ANSI_TO_CGA_FG_OFFST < 0)){
+				return NULL;
+			}
+			*color = ansi_to_cga[tmp_color - ANSI_TO_CGA_FG_OFFST];
+			return ++fmt;
+		}
+		if(!is_fg_code && ch == 'm'){
+			if((tmp_color - ANSI_TO_CGA_BG_OFFST > 7 ) || (tmp_color - ANSI_TO_CGA_BG_OFFST < 0)){
+				return NULL;
+			}
+			*color = ansi_to_cga[tmp_color - ANSI_TO_CGA_BG_OFFST];
+			return ++fmt;
+		}
+		if(ch < '0' || ch > '9'){
+			return NULL;
+		}
+	}
+	return NULL;
+}
 
 // Main function to format and print a string.
 void printfmt(void (*putch)(int, void*), void *putdat, const char *fmt, ...);
@@ -92,7 +137,23 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		while ((ch = *(unsigned char *) fmt++) != '%') {
 			if (ch == '\0')
 				return;
-			putch(ch, putdat);
+			if(ch == '['){
+				const char *fmt_idx = fmt;
+				uint8_t tmp_fg_code, tmp_bg_code;
+				if((fmt = parsecolor(fmt, &tmp_fg_code, 1)) == NULL){
+					fmt = fmt_idx;
+					ch = '[';
+				}
+				else if((fmt = parsecolor(fmt,&tmp_bg_code, 0)) == NULL){
+					fmt = fmt_idx;
+					ch = '[';
+				}
+				else{
+					color_code = (tmp_bg_code<<4) + tmp_fg_code;
+					continue;
+				}
+			}
+			putch(ch + (color_code << 8), putdat);
 		}
 
 		// Process a %-escape sequence
@@ -157,7 +218,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// character
 		case 'c':
-			putch(va_arg(ap, int), putdat);
+			putch(va_arg(ap, int) + (color_code << 8), putdat);
 			break;
 
 		// error message
@@ -177,21 +238,21 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 				p = "(null)";
 			if (width > 0 && padc != '-')
 				for (width -= strnlen(p, precision); width > 0; width--)
-					putch(padc, putdat);
+					putch(padc + (color_code << 8), putdat);
 			for (; (ch = *p++) != '\0' && (precision < 0 || --precision >= 0); width--)
 				if (altflag && (ch < ' ' || ch > '~'))
-					putch('?', putdat);
+					putch('?' + (color_code << 8), putdat);
 				else
-					putch(ch, putdat);
+					putch(ch + (color_code << 8), putdat);
 			for (; width > 0; width--)
-				putch(' ', putdat);
+				putch(' ' + (color_code << 8), putdat);
 			break;
 
 		// (signed) decimal
 		case 'd':
 			num = getint(&ap, lflag);
 			if ((long long) num < 0) {
-				putch('-', putdat);
+				putch('-' + (color_code << 8), putdat);
 				num = -(long long) num;
 			}
 			base = 10;
@@ -206,15 +267,14 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		// (unsigned) octal
 		case 'o':
 			// Replace this with your code.
-			putch('X', putdat);
-			putch('X', putdat);
-			putch('X', putdat);
-			break;
+			num = getuint(&ap, lflag);
+			base = 8;
+			goto number;
 
 		// pointer
 		case 'p':
-			putch('0', putdat);
-			putch('x', putdat);
+			putch('0' + (color_code << 8), putdat);
+			putch('x' + (color_code << 8), putdat);
 			num = (unsigned long long)
 				(uintptr_t) va_arg(ap, void *);
 			base = 16;
@@ -230,12 +290,12 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 
 		// escaped '%' character
 		case '%':
-			putch(ch, putdat);
+			putch(ch + (color_code << 8), putdat);
 			break;
 
 		// unrecognized escape sequence - just print it literally
 		default:
-			putch('%', putdat);
+			putch('%' + (color_code << 8), putdat);
 			for (fmt--; fmt[-1] != '%'; fmt--)
 				/* do nothing */;
 			break;
