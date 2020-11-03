@@ -33,7 +33,7 @@ static const char * const error_string[MAXERROR] =
  */
 #define ANSI_TO_CGA_FG_OFFST 30
 #define ANSI_TO_CGA_BG_OFFST 40
-static uint8_t color_code = 7;
+static uint8_t color_code;
 static int ansi_to_cga[] = {
 	0, /* black */
     4, /* red */
@@ -132,6 +132,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 	unsigned long long num;
 	int base, lflag, width, precision, altflag;
 	char padc;
+	color_code = 7;
 
 	while (1) {
 		while ((ch = *(unsigned char *) fmt++) != '%') {
