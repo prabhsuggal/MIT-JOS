@@ -10,6 +10,7 @@
 #include <kern/console.h>
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
+#include <kern/pmap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
@@ -25,9 +26,109 @@ static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "backtrace", "Display stack backtrace", mon_backtrace },
+	{ "showmappings", "Display Physical page mappings", mon_mappings},
+	{ "setmappings", "set permissions for a gicen address space", set_mappings},
+	{ "dump", "Dump contents given a virtual address space", dump},
 };
 
 /***** Implementations of basic kernel monitor commands *****/
+int dump(int argc, char **argv, struct Trapframe *tf){
+	if(argc < 3){
+		cprintf("Usage: dump <addr> <no. of entries>\n");
+		return 0;
+	}
+
+	uintptr_t start = strtol(argv[1], NULL, 16), end;
+	size_t num = strtol(argv[2], NULL, 16);
+	end = start+num;
+	cprintf("start 0x%x end 0x%x\n", start, end);
+	do{
+		pte_t *pte = pgdir_walk(kern_pgdir, (void*)start, false);
+		if(pte == NULL || !(*pte & PTE_P)){
+			cprintf("va: 0x%x - 0x%x not mapped\n", start, ROUNDUP(start+1, PGSIZE));
+			start = ROUNDUP(start+1, PGSIZE);
+			continue;
+		}
+		uintptr_t* addr = (uintptr_t*)start;
+		for(long stop = MIN(end, ROUNDUP(start+1, PGSIZE)); (long)addr < stop; addr++){
+			cprintf("Value at 0x%x is 0x%x\n", (uintptr_t)addr, *addr);
+		}
+		start = (uintptr_t)addr;
+	}while (start < end);
+
+	return 0;
+}
+
+int set_mappings(int argc, char **argv, struct Trapframe *tf)
+{
+	if(argc < 4){
+		cprintf("Usage: set_mappings <start> <end> <permissions> (start <= end)\n\
+permissions will be applied to all pages within the range [start, end]\n");
+		return 0;
+	}
+	long start, end;
+	uint16_t perm;
+	start = strtol(argv[1], NULL, 16);
+	end = strtol(argv[2], NULL, 16);
+	perm = strtol(argv[3], NULL, 16);
+	perm &= 0xFFF;
+
+	for(int i = start; i <= end - end%PGSIZE; i += PGSIZE){
+		pte_t* pte  = pgdir_walk(kern_pgdir, (void*)i, false);
+		if(pte == NULL)
+			continue;
+		*pte = ((*pte) & ~0xFFF) | perm;
+		cprintf("va:0x%04x page addr:0x%x offset:0x%x User:%d Writable:%d Dirty:%d PSE:%d\n",
+			i, PTE_ADDR(*pte),
+			i & ((*pte & PTE_PS)?0x3FFFFF:0xFFF),
+			(*pte & PTE_U)?1:0,
+			(*pte & PTE_W)?1:0,
+			(*pte & PTE_D)?1:0,
+			(*pte & PTE_PS)?1:0);
+	}
+	return 0;
+}
+
+int mon_mappings(int argc, char **argv, struct Trapframe *tf)
+{
+	if(argc == 1){
+		cprintf("Need a range of virtual addresses/a single virtual address\n");
+		return 0;
+	}
+	long start,end;
+	start = strtol(argv[1], NULL, 16);
+	if(argc == 2){
+		end=start;
+	}
+	else if(argc == 3){
+		end=strtol(argv[2], NULL, 16);
+		if( end < start){
+			cprintf("Usage: showmappings <start> <end>\n   (start <= end)\n");
+			return 0;
+		}
+	}
+	else{
+		cprintf("Usage: showmappings <start_va_addr> <end_va_addr>\n");
+		return 0;
+	}
+	for(long i=start; i <= end; i+=(1<<12)){
+		pte_t* pte = pgdir_walk(kern_pgdir, (void *)i, false);
+		if(pte == NULL || !(*pte & PTE_P)){
+			cprintf("va: 0x%04x  Not Mapped\n", i);
+		}
+		else{
+			cprintf("va:0x%04x page addr:0x%x offset:0x%x User:%d Writable:%d Dirty:%d PSE:%d\n",
+			i, PTE_ADDR(*pte),
+			i & ((*pte & PTE_PS)?0x3FFFFF:0xFFF),
+			(*pte & PTE_U)?1:0,
+			(*pte & PTE_W)?1:0,
+			(*pte & PTE_D)?1:0,
+			(*pte & PTE_PS)?1:0);
+		}
+	}
+	return 0;
+}
+
 
 int
 mon_help(int argc, char **argv, struct Trapframe *tf)
