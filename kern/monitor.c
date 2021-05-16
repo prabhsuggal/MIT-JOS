@@ -30,9 +30,31 @@ static struct Command commands[] = {
 	{ "showmappings", "Display Physical page mappings", mon_mappings},
 	{ "setmappings", "set permissions for a gicen address space", set_mappings},
 	{ "dump", "Dump contents given a virtual address space", dump},
+	{ "continue", "Running normal execution of program", Continue},
+	{ "si", "Step to the next instruction(only in case of breakpoint)", stepinto},
 };
 
 /***** Implementations of basic kernel monitor commands *****/
+#define TRAP_FLAG 0x100
+int stepinto(int argc, char **argv, struct Trapframe *tf){
+	switch(tf->tf_trapno){
+		case T_DEBUG:
+		case T_BRKPT:{
+			tf->tf_eflags = tf->tf_eflags | TRAP_FLAG;
+			return -1;
+		}
+		default:{
+			cprintf("Cmd can be only used in case of breakpoint\n");
+			break;
+		}
+	}
+	return 0;
+}
+
+int Continue(int argc, char **argv, struct Trapframe *tf){
+	return -1;
+}
+
 int dump(int argc, char **argv, struct Trapframe *tf){
 	if(argc < 3){
 		cprintf("Usage: dump <addr> <no. of entries>\n");
@@ -163,13 +185,13 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	// Your code here.
 	uint32_t* ebp;
 	struct Eipdebuginfo eipinfo;
-	
+
 	ebp = (uint32_t*)read_ebp();
 	cprintf("Stack backtrace:\n");
 	for(; ebp != 0; ){
 		cprintf("ebp %08x eip %08x args", ebp, ebp[1]);
 		for(int i = 0; i < 5; i++){
-			cprintf(" %08x", ebp[i+2]);
+			cprintf(" 0x%08x %08x",(uintptr_t)(ebp+i+2), ebp[i+2]);
 		}
 		cprintf("\n");
 		if(debuginfo_eip(ebp[1], &eipinfo) == 0){

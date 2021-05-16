@@ -164,7 +164,27 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
-
+	switch(tf->tf_trapno){
+		case T_SYSCALL:{
+			//cprintf("current syscall is %d\n", tf->tf_regs.reg_eax);
+			tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax,
+					tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx,
+					tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+			return;
+		}
+		case T_BRKPT:{
+			monitor(tf);
+			return;
+		}
+		case T_PGFLT:{
+			if((tf->tf_cs & 3) == 0){
+				panic("Kernel shouldn't have page fault\n");
+			}
+			page_fault_handler(tf);
+			break;
+		}
+		default: break;
+	}
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
 	if (tf->tf_cs == GD_KT)
@@ -187,7 +207,7 @@ trap(struct Trapframe *tf)
 	// the interrupt path.
 	assert(!(read_eflags() & FL_IF));
 
-	cprintf("Incoming TRAP frame at %p\n", tf);
+	cprintf("Incoming TRAP frame at %p  %s\n", tf, trapname(tf->tf_trapno));
 
 	if ((tf->tf_cs & 3) == 3) {
 		// Trapped from user mode.

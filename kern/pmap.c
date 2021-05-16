@@ -289,7 +289,7 @@ page_init(void)
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
 	size_t i;
-	
+
 	// Page 0
 	pages[0].pp_ref = 1;
 	pages[0].pp_link = NULL;
@@ -430,7 +430,6 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 	physaddr_t pgtable_pa = PTE_ADDR(pde);
 	pde_t *pgtable_va = KADDR(pgtable_pa);
 	return &pgtable_va[PTX(addr)];
-
 }
 
 //
@@ -601,7 +600,27 @@ int
 user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 {
 	// LAB 3: Your code here.
+	uintptr_t addr = (uintptr_t)va;
+	if(addr >= ULIM){
+		user_mem_check_addr = addr;
+		return -E_FAULT;
+	}
 
+	pde_t* pgdir = env->env_pgdir;
+	pte_t* pte;
+	uintptr_t begin = ROUNDDOWN(addr, PGSIZE), end = ROUNDUP(addr+len, PGSIZE);
+	for(;begin<end; begin+=PGSIZE){
+		if(begin >= ULIM){
+			user_mem_check_addr = ULIM;
+			return -E_FAULT;
+		}
+
+		pte = pgdir_walk(pgdir, (const void*)begin, false);
+		if(!pte || ((*pte & (PTE_P | perm)) == 0)){
+			user_mem_check_addr = begin > addr ? begin : addr;
+			return -E_FAULT;
+		}
+	}
 	return 0;
 }
 
