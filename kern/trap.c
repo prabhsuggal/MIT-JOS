@@ -72,8 +72,28 @@ trap_init(void)
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
+	SETGATE(idt[T_DIVIDE], true, GD_KT,t_divide, 0);
+	SETGATE(idt[T_DEBUG], true, GD_KT,t_debug, 0);
+	SETGATE(idt[T_NMI], false, GD_KT,t_nmi, 0);
+	SETGATE(idt[T_BRKPT], true, GD_KT,t_brkpt, 3);
+	SETGATE(idt[T_OFLOW], true, GD_KT,t_oflow, 0);
+	SETGATE(idt[T_BOUND], true, GD_KT,t_bound, 0);
+	SETGATE(idt[T_ILLOP], true, GD_KT,t_illop, 0);
+	SETGATE(idt[T_DEVICE], true, GD_KT,t_device, 0);
+	SETGATE(idt[T_DBLFLT], false, GD_KT,t_dblflt, 0);
+	SETGATE(idt[T_TSS], true, GD_KT,t_tss, 0);
+	SETGATE(idt[T_SEGNP], true, GD_KT,t_segnp, 0);
+	SETGATE(idt[T_STACK], true, GD_KT,t_stack, 0);
+	SETGATE(idt[T_GPFLT], true, GD_KT,t_gpflt, 0);
+	SETGATE(idt[T_PGFLT], true, GD_KT,t_pgflt, 0);
+	SETGATE(idt[T_FPERR], true, GD_KT,t_fperr, 0);
+	SETGATE(idt[T_ALIGN], true, GD_KT,t_align, 0);
+	SETGATE(idt[T_MCHK], false, GD_KT,t_mchk, 0);
+	SETGATE(idt[T_SIMDERR], true, GD_KT,t_simderr, 0);
 
-	// Per-CPU setup 
+	SETGATE(idt[T_SYSCALL], true, GD_KT, t_syscall, 3);
+
+	// Per-CPU setup
 	trap_init_percpu();
 }
 
@@ -190,6 +210,27 @@ trap_dispatch(struct Trapframe *tf)
 	// interrupt using lapic_eoi() before calling the scheduler!
 	// LAB 4: Your code here.
 
+	switch(tf->tf_trapno){
+		case T_SYSCALL:{
+			//cprintf("current syscall is %d\n", tf->tf_regs.reg_eax);
+			tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax,
+					tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx,
+					tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+			return;
+		}
+		case T_BRKPT:{
+			monitor(tf);
+			return;
+		}
+		case T_PGFLT:{
+			if((tf->tf_cs & 3) == 0){
+				panic("Kernel shouldn't have page fault\n");
+			}
+			page_fault_handler(tf);
+			break;
+		}
+		default: break;
+	}
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
 	if (tf->tf_cs == GD_KT)
@@ -220,6 +261,8 @@ trap(struct Trapframe *tf)
 	// fails, DO NOT be tempted to fix it by inserting a "cli" in
 	// the interrupt path.
 	assert(!(read_eflags() & FL_IF));
+
+	cprintf("Incoming TRAP frame at %p  %s\n", tf, trapname(tf->tf_trapno));
 
 	if ((tf->tf_cs & 3) == 3) {
 		// Trapped from user mode.
