@@ -26,7 +26,7 @@ static struct Env *env_free_list;	// Free environment list
 // Set up global descriptor table (GDT) with separate segments for
 // kernel mode and user mode.  Segments serve many purposes on the x86.
 // We don't use any of their memory-mapping capabilities, but we need
-// them to switch privilege levels. 
+// them to switch privilege levels.
 //
 // The kernel and user segments are identical except for the DPL.
 // To load the SS register, the CPL must equal the DPL.  Thus,
@@ -172,7 +172,7 @@ env_setup_vm(struct Env *e)
 
 	// Allocate a page for the page directory
 	if (!(p = page_alloc(ALLOC_ZERO)))
-		return -E_NO_MEM;	
+		return -E_NO_MEM;
 
 	// Now, set e->env_pgdir and initialize the page directory.
 	//
@@ -195,7 +195,7 @@ env_setup_vm(struct Env *e)
 	e->env_pgdir = (pde_t *) page2kva(p);
 	//we can just copy pgdir because everything in kern_pgdir is static
 	memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
-	
+
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
@@ -366,15 +366,15 @@ load_icode(struct Env *e, uint8_t *binary)
 	ph = (struct Proghdr*)((uint8_t*)ELFHDR + ELFHDR->e_phoff);
 
 	eph = ph + ELFHDR->e_phnum;
-	
+
 	lcr3(PADDR(e->env_pgdir));
-	//Using this because we are using memset and memcpy operation which 
+	//Using this because we are using memset and memcpy operation which
 	// will only work if we use this page dir as we have stored PTEs in this
 	// directory only.
 
 	for(;ph<eph;ph++){
 		if (ph->p_type == ELF_PROG_LOAD) {
-			assert(ph->p_filesz<=ph->p_memsz); 
+			assert(ph->p_filesz<=ph->p_memsz);
 			region_alloc(e, (void *)ph->p_va, ph->p_memsz);
 			memset((void *)ph->p_va, 0, ph->p_memsz);
 			memcpy((void *)ph->p_va, binary+ph->p_offset, ph->p_filesz);
@@ -545,6 +545,7 @@ env_run(struct Env *e)
 	curenv->env_status = ENV_RUNNING;
 	curenv->env_runs++;
 	lcr3(PADDR(curenv->env_pgdir));
+	unlock_kernel();
 	env_pop_tf(&(curenv->env_tf));
 
 	//panic("env_run not yet implemented");

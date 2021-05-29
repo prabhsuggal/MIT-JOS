@@ -33,10 +33,10 @@
 .set PROT_MODE_CSEG, 0x8	# kernel code segment selector
 .set PROT_MODE_DSEG, 0x10	# kernel data segment selector
 
-.code16           
+.code16
 .globl mpentry_start
 mpentry_start:
-	cli            
+	cli
 
 	xorw    %ax, %ax
 	movw    %ax, %ds
@@ -64,6 +64,10 @@ start32:
 	# we are still running at a low EIP.
 	movl    $(RELOC(entry_pgdir)), %eax
 	movl    %eax, %cr3
+	# Turn on page size extension for 4Mbyte pages
+	movl    %cr4, %eax
+	orl     $(CR4_PSE), %eax
+	movl    %eax, %cr4
 	# Turn on paging.
 	movl    %cr0, %eax
 	orl     $(CR0_PE|CR0_PG|CR0_WP), %eax
@@ -76,6 +80,7 @@ start32:
 	# Call mp_main().  (Exercise for the reader: why the indirect call?)
 	movl    $mp_main, %eax
 	call    *%eax
+	#call mp_main
 
 	# If mp_main returns (it shouldn't), loop.
 spin:
