@@ -30,7 +30,7 @@ static const char * const error_string[MAXERROR] =
 	[E_EOF]		= "unexpected end of file",
 };
 
-/* 
+/*
  * ansi to CGA_format
  */
 #define ANSI_TO_CGA_FG_OFFST 30

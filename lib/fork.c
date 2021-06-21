@@ -24,6 +24,13 @@ pgfault(struct UTrapframe *utf)
 	//   Use the read-only page table mappings at uvpt
 	//   (see <inc/memlayout.h>).
 
+	pte_t pte = uvpt[PGNUM(addr)];
+	if(!(err & FEC_WR)){
+		panic("pgfault: given access not a write");
+	}
+	else if(!(pte&PTE_COW)){
+		panic("pgfault: Not a COW page");
+	}
 	// LAB 4: Your code here.
 
 	// Allocate a new page, map it at a temporary location (PFTEMP),
@@ -33,8 +40,19 @@ pgfault(struct UTrapframe *utf)
 	//   You should make three system calls.
 
 	// LAB 4: Your code here.
+	int perm = PTE_P | PTE_W | PTE_U;
+	r = sys_page_alloc(0, (void*)PFTEMP, perm);
+	if(r < 0)panic("sys_page_alloc : %e", r);
 
-	panic("pgfault not implemented");
+	memmove(PFTEMP, ROUNDDOWN(addr, PGSIZE), PGSIZE);
+
+	r = sys_page_map(0, (void*)PFTEMP, 0, (void*)ROUNDDOWN(addr, PGSIZE), perm);
+	if(r < 0)panic("sys_page_map : %e", r);
+
+	r = sys_page_unmap(0, PFTEMP);
+	if(r < 0)panic("sys_page_unmap : %e", r);
+
+	//panic("pgfault not implemented");
 }
 
 //
@@ -53,8 +71,30 @@ duppage(envid_t envid, unsigned pn)
 {
 	int r;
 
+	pte_t pte = uvpt[pn];
+
+	if(!(pte & PTE_W) && !(pte & PTE_COW)){
+		r = sys_page_map(thisenv->env_id,
+						  (void*)(pn*PGSIZE),
+						  envid,
+						  (void*)(pn*PGSIZE), pte & PTE_SYSCALL);
+		if(r < 0)panic("duppage: %e", r);
+		return 0;
+	}
+
+	pte &= ~PTE_W;
+	pte |= PTE_COW;
+
+	r = sys_page_map(thisenv->env_id, (void*)(pn*PGSIZE),
+					envid, (void*)(pn*PGSIZE), pte & PTE_SYSCALL);
+	if(r < 0)panic("duppage: %e", r);
+
+	r = sys_page_map(thisenv->env_id, (void*)(pn*PGSIZE),
+					thisenv->env_id, (void*)(pn*PGSIZE), pte & PTE_SYSCALL);
+	if(r < 0)panic("duppage: %e", r);
+
 	// LAB 4: Your code here.
-	panic("duppage not implemented");
+	// panic("duppage not implemented");
 	return 0;
 }
 
@@ -77,14 +117,94 @@ duppage(envid_t envid, unsigned pn)
 envid_t
 fork(void)
 {
+	int rc;
+	set_pgfault_handler(pgfault);
+
+	envid_t childId = sys_exofork();
+	if(childId < 0){
+		panic("sys_exofork: %e", childId);
+	}
+	else if(childId==0){
+		thisenv = &envs[ENVX(sys_getenvid())];
+		return childId;
+	}
+
+	bool is_below_ulim = true;
+
+	for(int i=0; is_below_ulim && i < NPDENTRIES; i++){
+		if(!(uvpd[i] && PTE_P))
+			continue;
+
+		for(int j=0; is_below_ulim && j < NPTENTRIES; j++){
+			unsigned pn = i*NPTENTRIES + j;
+			if(pn == ((UXSTACKTOP-PGSIZE) >> PGSHIFT))continue;
+			else if(pn >= UTOP >> PGSHIFT){
+				is_below_ulim = true;
+				continue;
+			}
+			else if(uvpt[pn] & PTE_P){
+				duppage(childId, pn);
+			}
+		}
+	}
+
+	// install upcall
+	extern void _pgfault_upcall();
+	assert(sys_env_set_pgfault_upcall(childId, _pgfault_upcall) == 0);
+	// allocate the user exception stack (not COW)
+	assert(sys_page_alloc(childId, (void *)(UXSTACKTOP - PGSIZE), PTE_P | PTE_W | PTE_U) == 0);
+	// let the child start
+	assert(sys_env_set_status(childId, ENV_RUNNABLE) == 0);
+
+	return childId;
+
 	// LAB 4: Your code here.
-	panic("fork not implemented");
+	//panic("fork not implemented");
 }
 
 // Challenge!
 int
 sfork(void)
 {
-	panic("sfork not implemented");
-	return -E_INVAL;
+	int rc;
+	set_pgfault_handler(pgfault);
+
+	envid_t childId = sys_exofork();
+	if(childId < 0){
+		panic("sys_exofork: %e", childId);
+	}
+	else if(childId==0){
+		thisenv = &envs[ENVX(sys_getenvid())];
+		return childId;
+	}
+
+	bool is_below_ulim = true;
+
+	for(int i=0; is_below_ulim && i < NPDENTRIES; i++){
+		if(!(uvpd[i] && PTE_P))
+			continue;
+		for(int j=0; is_below_ulim && j < NPTENTRIES; j++){
+			unsigned pn = i*NPTENTRIES + j;
+			if(pn == ((UXSTACKTOP-PGSIZE) >> PGSHIFT))continue;
+			else if(pn >= UTOP >> PGSHIFT){
+				is_below_ulim = true;
+				continue;
+			}
+			else if(uvpt[pn] & PTE_P){
+				duppage(childId, pn);
+			}
+		}
+	}
+
+	// install upcall
+	extern void _pgfault_upcall();
+	assert(sys_env_set_pgfault_upcall(childId, _pgfault_upcall) == 0);
+	// allocate the user exception stack (not COW)
+	assert(sys_page_alloc(childId, (void *)(UXSTACKTOP - PGSIZE), PTE_P | PTE_W | PTE_U) == 0);
+	// let the child start
+	assert(sys_env_set_status(childId, ENV_RUNNABLE) == 0);
+
+	return childId;
+	//panic("sfork not implemented");
+	//return -E_INVAL;
 }
