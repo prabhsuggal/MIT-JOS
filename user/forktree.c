@@ -30,6 +30,16 @@ forktree(const char *cur)
 	forkchild(cur, '1');
 }
 
+int a = 2;
+void
+forkchange(void){
+	if(fork() == 0){
+		a++;
+	}
+
+	cprintf("%04x: a: %d\n", sys_getenvid(), a);
+}
+
 void
 umain(int argc, char **argv)
 {
